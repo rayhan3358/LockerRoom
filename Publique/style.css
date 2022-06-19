@@ -1,0 +1,2 @@
+--creation d'une table avec une colonne
+create table ma_table (nom varchar(200))
