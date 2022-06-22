@@ -1,117 +1,36 @@
-import pg from 'pg'
-import express from 'express'
-import bcrypt from 'bcrypt'
-import JWT from 'jsonwebtoken'
+import express, {json} from 'express'
+import cors from 'cors'
 import dotenv from 'dotenv'
-import { promisify } from 'util'
+import cookieParser from 'cookie-parser'
+import {dirname, join} from 'path'
+import { fileURLToPath } from 'url'
+import usersRouter from './routes/users-routes.js'
+import authRouter from './routes/auth-routes.js'
 
-const { Pool } = pg
+dotenv.config();
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
-dotenv.config()
+const app = express()
+const PORT = process.env.PORT || 5000
+const corsOptions = {credentials:true, origin: process.env.URL || "*"}
 
-const pool = new Pool()
-await pool.connect()
+app.use(cors(corsOptions))
+app.use(json())
+app.use(cookieParser())
 
+app.use('/', express.static(join(__dirname, 'public')))
+app.use('/api/users', usersRouter)
+app.use('/api/auth', authRouter)
 
-const server = express()
-
-
-const sign = promisify(JWT.sign)
-const verify = promisify(JWT.verify)
-
-
-server.use(express.json())
-
-server.post('/api/register', async (req, res) => {
-  const { email, nickname, password } = req.body
-
-  if (!email || !password || !nickname)
-    return res.status(400).send({ error: 'Invalid request' })
-
-  try {
-    const encryptedPassword = await bcrypt.hash(password, 10)
-
-    await pool.query(
-      'INSERT INTO users (email, password, nickname) VALUES ($1, $2, $3)',
-      [email, encryptedPassword, nickname]
-    )
-
-    return res.send({ info: 'User succesfully created' })
-  } catch (err) {
-    console.log(err)
-
-    return res.status(500).send({ error: 'Internal server error' })
-  }
+app.get('/login', (req,res) => {
+    res.sendFile(join(__dirname, 'public/login.html'))
 })
 
-server.post('/api/login', async (req, res) => {
-  const { email, password } = req.body
-
-  if (!email || !password)
-    return res.status(400).send({ error: 'Invalid request' })
-
-  const q = await pool.query(
-    'SELECT password, id, nickname from users WHERE email=$1',
-    [email]
-  )
-
-  if (q.rowCount === 0) {
-    return res.status(404).send({ error: 'This user does not exist' })
-  }
-
-  const result = q.rows[0]
-  const match = await bcrypt.compare(password, result.password)
-
-  if (!match) {
-    return res.status(403).send({ error: 'Wrong password' })
-  }
-
-  try {
-    const token = await sign(
-      { id: result.id, nickname: result.nickname, email },
-      process.env.JWT_SECRET,
-      {
-        algorithm: 'HS512',
-        expiresIn: '1h',
-      }
-    )
-
-    return res.send({ token })
-  } catch (err) {
-    console.log(err)
-    return res.status(500).send({ error: 'Cannot generate token' })
-  }
+app.get('/register', (req,res) => {
+    res.sendFile(join(__dirname, 'public/register.html'))
 })
 
-
-server.use(async (req, res, next) => {
-  if (!req.headers.authorization) return res.status(401).send('Unauthorized')
-
-  try {
-    const decoded = await verify(
-      req.headers.authorization.split(' ')[1],
-      process.env.JWT_SECRET
-    )
-
-    if (decoded !== undefined) {
-      req.user = decoded
-      return next()
-    }
-  } catch (err) {
-    console.log(err)
-  }
-
-  return res.status(403).send('Invalid token')
+app.listen(PORT, () => {
+    console.log(`Server is listening on ${PORT}`)
 })
-
-server.get('/api/hello', (req, res) => {
-  res.send({ info: 'Hello ' + req.user.nickname })
-})
-
-server.get('/api/users', async (req, res) => {
-  const q = await pool.query('SELECT nickname from users')
-  return res.send(q.rows)
-})
-
-server.listen(3000, () => console.log('http://localhost:3000'))
